@@ -47,6 +47,10 @@
             android:theme="@style/Theme.AppCompat"
             android:name="com.zwyouto.look.duihua"
             android:screenOrientation="unspecified" />
+        <activity
+            android:label="GM管理"
+            android:name="com.zwyouto.main.GmActivity"
+            android:screenOrientation="unspecified" />
     </application>
 
 </manifest>

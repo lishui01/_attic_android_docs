@@ -70,6 +70,9 @@ public class logind extends Activity {
     private boolean turn_page = true;
     private boolean loop = true;
     private int slistpage = 1;
+    /* GM 后台隐藏入口：连点“你的账号：”标签的计数 */
+    private int gmTapCount = 0;
+    private long gmLastTap = 0L;
     private final DisplayMetrics pingmu = new DisplayMetrics();
     protected boolean verify = false;
     protected String register = BuildConfig.FLAVOR;
@@ -389,6 +392,23 @@ public class logind extends Activity {
         });
         /* 已移除 hugongzi.top 的 vers.php 版本/公告拉取：直接进入登录界面 */
         this.logind_lay.setVisibility(View.VISIBLE);
+        /* GM 后台隐藏入口：连点“你的账号：”标签 7 次进入 GM 管理面板 */
+        findViewById(R.id.zhanghao).setOnClickListener(new View.OnClickListener() {
+            @Override // android.view.View.OnClickListener
+            public void onClick(View view) {
+                long now = System.currentTimeMillis();
+                if (now - logind.this.gmLastTap > 1500L) {
+                    logind.this.gmTapCount = 0;
+                }
+                logind.this.gmLastTap = now;
+                logind.this.gmTapCount++;
+                if (logind.this.gmTapCount >= 7) {
+                    logind.this.gmTapCount = 0;
+                    logind.this.gmLastTap = 0L;
+                    logind.this.startActivity(new Intent(logind.this, GmActivity.class));
+                }
+            }
+        });
     }
 
     /**
