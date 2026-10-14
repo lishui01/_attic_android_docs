@@ -1,0 +1,21 @@
+# ---- 构建产物与本机配置（不入库）----
+.gradle/
+.idea/
+build/
+build_stale/
+app/build/
+app/build_stale/
+local.properties
+*.iml
+*.log
+captures/
+.cxx/
+build_out.log
+
+# ---- 交付用产物（由构建生成，需要留档时用 git add -f 手工加）----
+*.apk
+MudZJ.zip
+
+# ---- 系统垃圾 ----
+Thumbs.db
+.DS_Store
