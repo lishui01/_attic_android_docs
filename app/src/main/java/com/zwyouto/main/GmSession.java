@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  *
  *   1. 连接后服务端发 "ver1.0,&lt;key&gt;"，客户端回一行占位；
  *   2. 收到 "版本验证成功" 后发 "账号║密码║密文║邮箱"（密文段不校验）；
- *   3. 收到 ESC"0007" 即登录成功，随后用 ping 探测管理权限；
+ *   3. 收到 ESC"000"+"0007"（SYSY"0007"）即登录成功，随后用 ping 探测管理权限；
  *   4. 之后按 "gm -r &lt;请求号&gt; &lt;子命令&gt;" 串行下发，
  *      服务端以 ESC"030"+JSON 回包（见 cmds/adm/gm.c）。
  *
@@ -50,8 +50,15 @@ public class GmSession {
 
     /** 登录字段分隔符 ║（U+2551），与 logind.c 的 explode(arg,"║") 对应。 */
     private static final String SEP = "\u2551";
-    /** gm.c 的登录成功码（SYSY"0007"）。 */
-    private static final String CODE_LOGIN_OK = "\u001b0007";
+    /**
+     * 登录成功码：logind.c 里写的是 write(SYSY"0007")，而 SYSY = ESC + "000"
+     * （include/zjmud.h），所以线路上的字节是 ESC + "000" + "0007"。
+     * zj 协议是「ESC + 3 位码 + 载荷」：000 是状态机码、0007 是它的载荷，
+     * 网页端由 zj.js 的 case '000' 把载荷拆出来（mudsession.js 走的是解析器，
+     * 所以没事）。这里必须整体匹配，写成 "\u001b0007" 永远匹配不上 ——
+     * 表现就是「能登录、但一直停在登录页刷服务端原始文本，进不去管理界面」。
+     */
+    private static final String CODE_LOGIN_OK = "\u001b" + "000" + "0007";
     /** gm.c 的回包前缀（ESA"030"，ESA 是真实 ESC 字节）。 */
     private static final String CODE_GM = "\u001b030";
     /** ZJFORCECMD "014"：服务端要求客户端代为执行的命令（如 reconnect 后的 look）。 */
