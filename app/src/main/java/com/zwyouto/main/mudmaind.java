@@ -862,7 +862,11 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                     mudmaind.mudsock.setPort(Integer.valueOf(split6[1]).intValue());
                     mudmaind.mudsock.new_sock(mudmaind.mudsock.getAddr(), mudmaind.mudsock.getPort());
                 } else if (substring.equals("\u001b999")) {
-                    System.exit(0);
+                    /* 服务端要求客户端退出：GM 面板在前台时先让路，
+                       否则进程被杀会表现为“点登录就弹回登录页”。 */
+                    if (!GmActivity.isPanelActive()) {
+                        System.exit(0);
+                    }
                 } else if (substring.equals("\u001b997")) {
                     mudmaind.mudsock.set_cmdss(false);
                 } else if (substring.equals("\u001b998")) {

@@ -50,6 +50,7 @@
         <activity
             android:label="GM管理"
             android:name="com.zwyouto.main.GmActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode"
             android:screenOrientation="unspecified" />
     </application>
 

@@ -14,6 +14,9 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.regex.Pattern;
 
 /**
@@ -42,6 +45,11 @@ public class GmSession {
 
         /** 登录失败/断线。 */
         void onError(String message);
+    }
+
+    /** 登录各阶段的即时通知，用于把“卡在哪一步”落地保存。 */
+    public interface StageListener {
+        void onStage(String stage);
     }
 
     public interface CommandCallback {
@@ -104,12 +112,15 @@ public class GmSession {
     private InputStream in;
     private OutputStream out;
     private Thread reader;
+    /** 串行写队列：所有 socket 写操作都在这个后台线程执行。 */
+    private ExecutorService writer;
 
     private String host = "";
     private int port;
     private String id = "";
     private String password = "";
     private ConnectCallback connectCb;
+    private StageListener stageCb;
 
     private boolean handshakeSent;
     private boolean credentialSent;
@@ -226,12 +237,37 @@ public class GmSession {
 
     /* ---------------- 连接与登录 ---------------- */
 
+    public void setStageListener(StageListener l) {
+        this.stageCb = l;
+    }
+
+    /** 上报当前阶段；回调方自己负责落盘，这里绝不让它影响主流程。 */
+    private void stage(String s) {
+        StageListener l = stageCb;
+        if (l == null) return;
+        try {
+            l.onStage(s);
+        } catch (Throwable ignore) {
+            // 记录失败不影响登录
+        }
+    }
+
     public void connect(String host, int port, String id, String password, ConnectCallback cb) {
         this.host = host == null ? "" : host.trim();
         this.port = port;
         this.id = id == null ? "" : id.trim().toLowerCase();
         this.password = password == null ? "" : password;
         this.connectCb = cb;
+
+        if (writer != null) writer.shutdownNow();
+        writer = Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "gm-writer");
+                t.setDaemon(true);
+                return t;
+            }
+        });
 
         this.handshakeSent = false;
         this.credentialSent = false;
@@ -278,6 +314,7 @@ public class GmSession {
                     + "\n\n请确认地址与端口正确（应与登录游戏时一致）。");
             return;
         }
+        stage("TCP 已连接 " + host + ":" + port + "，等待服务端回应");
         main.postDelayed(loginTimeout, LOGIN_TIMEOUT_MS);
     }
 
@@ -298,7 +335,12 @@ public class GmSession {
                     @Override
                     public void run() {
                         ConnectCallback cb = connectCb;
-                        if (cb != null) cb.onError("与服务端的连接已断开");
+                        if (cb == null) return;
+                        try {
+                            cb.onError("与服务端的连接已断开");
+                        } catch (Throwable t) {
+                            Log.e("GmSession", "onError 回调异常", t);
+                        }
                     }
                 });
             } else {
@@ -313,6 +355,7 @@ public class GmSession {
             handshakeSent = true;
             gotAnyData = true;
             note("【客户端】已连上服务端，发送握手占位行");
+            stage("服务端有回应，发送握手");
             // logind.c 的 jiance() 只认 "6278038"，其余原样放行（老格式 "web" 同样兼容）。
             sendRaw("web|android");
         }
@@ -386,6 +429,7 @@ public class GmSession {
             if (textBuf.indexOf(TEXT_VERIFY_OK) >= 0) {
                 credentialSent = true;
                 note("【客户端】版本验证成功，发送账号密码");
+                stage("版本验证通过，已提交账号密码");
                 sendRaw(id + SEP + password + SEP + "x" + SEP + id + "@web");
             }
         }
@@ -393,6 +437,7 @@ public class GmSession {
         if (!loginOk && line.indexOf(CODE_LOGIN_OK) >= 0) {
             loginOk = true;
             note("【客户端】收到 0007，登录成功");
+            stage("收到登录成功码 0007，开始探测管理权限");
             main.postDelayed(probeTask, 400);
         }
 
@@ -445,7 +490,17 @@ public class GmSession {
         boolean ok = res != null && res.optInt("ok", 0) == 1;
         String msg = res == null ? "服务端回包解析失败" : res.optString("msg", "");
         JSONObject data = res == null ? null : res.optJSONObject("data");
-        job.cb.onResult(ok, msg, data);
+        try {
+            job.cb.onResult(ok, msg, data);
+        } catch (Throwable t) {
+            /* 界面渲染出问题也只当作本命令失败，绝不让整个进程跟着挂掉 */
+            Log.e("GmSession", "命令回调异常：" + job.sub, t);
+            try {
+                job.cb.onResult(false, "客户端处理回包异常：" + t, null);
+            } catch (Throwable ignore) {
+                // 二次异常不再处理
+            }
+        }
     }
 
     private void finishLogin(JSONObject data) {
@@ -461,14 +516,28 @@ public class GmSession {
 
         ready = true;
         note("【客户端】权限校验通过：" + wizhood);
+        stage("权限校验通过：" + wizhood);
         main.removeCallbacks(loginTimeout);
         main.postDelayed(keepAlive, KEEPALIVE_MS);
 
         ConnectCallback cb = connectCb;
-        if (cb != null) cb.onReady(wizhood, online);
+        if (cb != null) {
+            try {
+                cb.onReady(wizhood, online);
+            } catch (Throwable t) {
+                Log.e("GmSession", "onReady 回调异常", t);
+                try {
+                    cb.onError("客户端内部错误：" + t);
+                } catch (Throwable ignore) {
+                    // ignore
+                }
+            }
+        }
     }
 
     private void failConnect(final String message) {
+        int nl = message == null ? -1 : message.indexOf('\n');
+        stage("失败：" + (nl < 0 ? message : message.substring(0, nl)));
         closed = true;
         ready = false;
         main.removeCallbacks(loginTimeout);
@@ -483,7 +552,11 @@ public class GmSession {
             main.post(new Runnable() {
                 @Override
                 public void run() {
-                    cb.onError(message);
+                    try {
+                        cb.onError(message);
+                    } catch (Throwable t) {
+                        Log.e("GmSession", "onError 回调异常", t);
+                    }
                 }
             });
         }
@@ -581,16 +654,37 @@ public class GmSession {
         }
     }
 
-    private void sendRaw(String line) {
-        OutputStream o = out;
-        if (o == null) return;
+    /**
+     * 发送一行文本。
+     * ------------------------------------------------------------------
+     * 必须异步：pump() 会在主线程被调用（onReady / probeTask / 心跳），
+     * 一旦在这里直接 out.write()，Android 会抛
+     * NetworkOnMainThreadException 直接把进程干掉 ——
+     * 表现就是「GM 面板点连接后毫无征兆地退回登录页」。
+     * 写操作统一丢给单线程队列，既保证顺序，又保证永远不在主线程。
+     */
+    private void sendRaw(final String line) {
+        final byte[] data = (line + "\n").getBytes(StandardCharsets.UTF_8);
+        ExecutorService w = writer;
+        if (w == null) return;
         try {
-            synchronized (lock) {
-                o.write((line + "\n").getBytes(StandardCharsets.UTF_8));
-                o.flush();
-            }
-        } catch (IOException e) {
-            // 写失败交由读线程的断线逻辑处理
+            w.execute(new Runnable() {
+                @Override
+                public void run() {
+                    OutputStream o = out;
+                    if (o == null) return;
+                    try {
+                        synchronized (lock) {
+                            o.write(data);
+                            o.flush();
+                        }
+                    } catch (IOException e) {
+                        // 写失败交由读线程的断线逻辑处理
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // 会话已关闭，直接丢弃
         }
     }
 
@@ -642,6 +736,9 @@ public class GmSession {
         socket = null;
         in = null;
         out = null;
+        ExecutorService w = writer;
+        writer = null;
+        if (w != null) w.shutdownNow();
         if (s != null) {
             try {
                 s.close();

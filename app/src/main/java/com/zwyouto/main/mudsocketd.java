@@ -76,6 +76,41 @@ public class mudsocketd extends Application {
     @Override // android.app.Application
     public void onCreate() {
         super.onCreate();
+        installCrashRecorder();
+    }
+
+    /**
+     * 把未捕获异常写到内部存储 gm_crash.txt。
+     * 用文件而不是 SharedPreferences：进程被杀/重启后仍能读到，
+     * 也不受多进程缓存影响。登录页恢复时读取并展示，读完即删。
+     */
+    private void installCrashRecorder() {
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread thread, Throwable e) {
+                try {
+                    java.io.StringWriter sw = new java.io.StringWriter();
+                    PrintWriter pw = new PrintWriter(sw);
+                    e.printStackTrace(pw);
+                    pw.flush();
+                    String text = "线程 " + thread.getName() + "  " + new java.util.Date() + "\n" + sw;
+                    if (text.length() > 3000) text = text.substring(0, 3000);
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(
+                            new java.io.File(getFilesDir(), "gm_crash.txt"));
+                    fos.write(text.getBytes(MUD_CHARSET));
+                    fos.close();
+                } catch (Throwable ignore) {
+                    // 记录失败也不能影响系统默认的崩溃处理
+                }
+                if (prev != null) {
+                    prev.uncaughtException(thread, e);
+                } else {
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                    System.exit(10);
+                }
+            }
+        });
     }
 
     public void new_sock(String ip, int pt) {

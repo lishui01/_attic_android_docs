@@ -470,6 +470,54 @@ public class logind extends Activity {
         }).start();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        showGmDiagIfAny();
+        showCrashIfAny();
+    }
+
+    /** 若上次进程崩溃，把堆栈直接弹出来（可长按复制），读完即删。 */
+    private void showCrashIfAny() {
+        try {
+            java.io.File f = new java.io.File(getFilesDir(), "gm_crash.txt");
+            if (!f.exists()) return;
+            byte[] buf = new byte[(int) f.length()];
+            java.io.FileInputStream fis = new java.io.FileInputStream(f);
+            int n = fis.read(buf);
+            fis.close();
+            // 先删再显示，避免每次启动都弹
+            if (!f.delete()) f.renameTo(new java.io.File(getFilesDir(), "gm_crash.old"));
+            if (n <= 0) return;
+            TextView tv = new TextView(this);
+            tv.setText(new String(buf, 0, n, mudsocketd.MUD_CHARSET));
+            tv.setTextSize(11.0f);
+            tv.setTextIsSelectable(true);
+            ScrollView sv = new ScrollView(this);
+            sv.addView(tv);
+            new AlertDialog.Builder(this)
+                    .setTitle("上次闪退原因")
+                    .setView(sv)
+                    .setPositiveButton("知道了", (DialogInterface.OnClickListener) null)
+                    .show();
+        } catch (Throwable ignore) {
+            // 读取失败不影响登录
+        }
+    }
+
+    /**
+     * GM 面板若被异常终止（崩溃 / 进程被 System.exit 杀掉），会在这里
+     * 把最后一次记录提示出来，方便判断是“点连接后就没了”还是“登录成功后才断”。
+     */
+    private void showGmDiagIfAny() {
+        if (this.mdate == null) return;
+        String diag = this.mdate.getString("gm_last_diag", "");
+        if (diag.equals(BuildConfig.FLAVOR)) return;
+        if (diag.equals(this.mdate.getString("gm_diag_seen", ""))) return;
+        this.mdate.edit().putString("gm_diag_seen", diag).commit();
+        Toast.makeText(getBaseContext(), "GM面板记录：" + diag, Toast.LENGTH_LONG).show();
+    }
+
     @Override // android.app.Activity, android.view.KeyEvent.Callback
     public boolean onKeyDown(int i, KeyEvent keyEvent) {
         return false;
@@ -681,6 +729,11 @@ public class logind extends Activity {
             } else {
                 if (logind.this.content.equals("与服务器断开连接！")) {
                     logind.this.loop = false;
+                    /* GM 面板在前台时不要弹框、更不能 System.exit(0)：
+                       那会把整个进程连同 GM 面板一起杀掉，表现为“点登录就弹回登录页”。 */
+                    if (GmActivity.isPanelActive()) {
+                        return;
+                    }
                     new AlertDialog.Builder(logind.this).setTitle("与服务器失去连接！").setCancelable(false).setPositiveButton("确定", new DialogInterface.OnClickListener() {
 
 
@@ -714,6 +767,9 @@ public class logind extends Activity {
                     }
                 } else if (!logind.this.verify) {
                     logind.this.loop = false;
+                    if (GmActivity.isPanelActive()) {
+                        return;
+                    }
                     new AlertDialog.Builder(logind.this).setTitle("服务器验证失败！").setCancelable(false).setPositiveButton("确定", new DialogInterface.OnClickListener() {
 
 
@@ -725,9 +781,16 @@ public class logind extends Activity {
                 } else if (logind.this.content.substring(4).equals("0003")) {
                     mudsocketd.mudout(logind.this.passedit.getText().toString());
                 } else if (logind.this.content.substring(4).equals("0008")) {
+                    if (GmActivity.isPanelActive()) {
+                        return;
+                    }
                     logind.this.reglayx.setVisibility(View.VISIBLE);
                     logind.this.mengban1.setVisibility(View.GONE);
                 } else if (logind.this.content.substring(4).equals("0007")) {
+                    /* GM 面板在前台时不要把主场景顶上来把面板挤掉 */
+                    if (GmActivity.isPanelActive()) {
+                        return;
+                    }
                     logind.this.startActivity(new Intent(logind.this, mudmaind.class));
                     logind.this.loop = false;
                     logind.this.finish();

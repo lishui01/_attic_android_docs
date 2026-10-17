@@ -6,9 +6,9 @@ import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
-import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -84,6 +84,22 @@ public class GmActivity extends Activity {
     private static final int C_TEXT = 0xFFD8E4F0;
     private static final int C_DIM = 0xFF8A97A6;
 
+    /** 上次会话留下的诊断信息（连接阶段 / 失败原因 / 面板异常关闭），下次进入时显示。 */
+    private static final String KEY_LAST_DIAG = "gm_last_diag";
+    /** 该记录是否已在游戏登录页提示过。 */
+    private static final String KEY_DIAG_SEEN = "gm_diag_seen";
+
+    /** 面板构建标记：装在手机上能一眼看出是不是这一版。 */
+    public static final String BUILD_TAG = "GM-2026.10.18-4";
+
+    /** GM 面板是否在前台。游戏登录页在后台断线时会 System.exit(0)，
+     *  那会把整个进程（连同 GM 面板）一起杀掉，所以要对它让路。 */
+    private static volatile boolean panelActive;
+
+    public static boolean isPanelActive() {
+        return panelActive;
+    }
+
     private interface InputHandler {
         void onInput(String text);
     }
@@ -100,11 +116,13 @@ public class GmActivity extends Activity {
     private TextView statusView;
     private TextView whoView;
     private LinearLayout content;
+    private Button loginBt;
 
     private String account = "";
     private String selectedId = "";
     private float density = 1f;
     private int scrw;
+    private long lastBackTime;
 
     private final Handler ui = new Handler();
 
@@ -162,7 +180,8 @@ public class GmActivity extends Activity {
         idEdit.getLayoutParams().height = h;
         passEdit.getLayoutParams().height = h;
 
-        findViewById(R.id.gm_login_bt).setOnClickListener(new View.OnClickListener() {
+        this.loginBt = (Button) findViewById(R.id.gm_login_bt);
+        this.loginBt.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 doLogin();
@@ -197,6 +216,13 @@ public class GmActivity extends Activity {
                 doLogout();
             }
         });
+        /* 上次会话留下的记录（连接阶段 / 失败原因 / 面板被异常关闭），进来就能看到 */
+        String last = prefs.getString(KEY_LAST_DIAG, "");
+        if (last.length() > 0) {
+            statusView.setText("上次记录：" + last + "\n（" + BUILD_TAG + "）");
+        } else {
+            statusView.setText(BUILD_TAG);
+        }
         /* 长按标题可随时查看服务端原始输出（排查用） */
         findViewById(R.id.gm_title).setOnLongClickListener(new View.OnLongClickListener() {
             @Override
@@ -207,21 +233,63 @@ public class GmActivity extends Activity {
         });
     }
 
+    /**
+     * 返回键分三种情况处理，避免「输入完密码一按返回就退回游戏登录页」：
+     * 1. 已在管理界面：只断开 GM 连接，回到本面板登录页；
+     * 2. 正在连接中：取消本次连接，仍留在本面板；
+     * 3. 其余：两秒内连按两次才真正关闭面板。
+     */
     @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && mainLay.getVisibility() == View.VISIBLE) {
+    public void onBackPressed() {
+        if (mainLay.getVisibility() == View.VISIBLE) {
             doLogout();
-            return true;
+            return;
         }
-        return super.onKeyDown(keyCode, event);
+        if (session != null) {
+            session.close();
+            session = null;
+            setLoginBusy(false);
+            ui.removeCallbacks(progressTick);
+            statusView.setText("已取消连接");
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastBackTime > 2000L) {
+            lastBackTime = now;
+            toast("再按一次返回键退出 GM 面板");
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        panelActive = true;
+    }
+
+    @Override
+    protected void onPause() {
+        panelActive = false;
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
+        panelActive = false;
         ui.removeCallbacks(progressTick);
         if (session != null) {
             session.close();
             session = null;
+        }
+        /* 用户自己关掉就把记录清干净；被动销毁才留记号，
+           这样“退回登录页”时能看出是主动退出还是被顶掉。 */
+        if (prefs != null) {
+            if (isFinishing()) {
+                clearLastDiag();
+            } else {
+                writeLastDiag("面板被系统销毁（finishing=false）");
+            }
         }
         super.onDestroy();
     }
@@ -265,32 +333,54 @@ public class GmActivity extends Activity {
 
         account = uid.toLowerCase();
         selectedId = "";
-        statusView.setText("正在连接 " + host + ":" + port + " ...");
+        statusView.setText("正在连接 " + host + ":" + port + " ...\n" + BUILD_TAG);
+        setLoginBusy(true);
+        /* 先落盘，万一面板被进程级终止，回来后也知道走到了哪一步 */
+        writeLastDiag("开始连接 " + host + ":" + port + "（账号 " + uid + "）");
 
         ui.removeCallbacks(progressTick);
         if (session != null) session.close();
-        session = new GmSession();
-        session.connect(host, port, uid, pwd, new GmSession.ConnectCallback() {
+        final GmSession s = new GmSession();
+        session = s;
+        /* 每个阶段立即落盘：即使进程被强行终止，也能知道卡在哪一步 */
+        s.setStageListener(new GmSession.StageListener() {
             @Override
-            public void onReady(String wizhood, int online) {
-                if (isFinishing()) return;
-                ui.removeCallbacks(progressTick);
-                loginLay.setVisibility(View.GONE);
-                mainLay.setVisibility(View.VISIBLE);
-                whoView.setText(account + "  [" + wizhood + "]");
-                loadList();
-            }
-
-            @Override
-            public void onError(String message) {
-                if (isFinishing()) return;
-                ui.removeCallbacks(progressTick);
-                loginLay.setVisibility(View.VISIBLE);
-                mainLay.setVisibility(View.GONE);
-                statusView.setText(summarize(message));
-                showDiag(message);
+            public void onStage(String st) {
+                writeLastDiag(st);
             }
         });
+        try {
+            s.connect(host, port, uid, pwd, new GmSession.ConnectCallback() {
+                @Override
+                public void onReady(String wizhood, int online) {
+                    if (isFinishing() || isDestroyed()) return;
+                    setLoginBusy(false);
+                    ui.removeCallbacks(progressTick);
+                    loginLay.setVisibility(View.GONE);
+                    mainLay.setVisibility(View.VISIBLE);
+                    whoView.setText(account + "  [" + wizhood + "]");
+                    writeLastDiag("GM 登录成功（" + wizhood + "）");
+                    loadList();
+                }
+
+                @Override
+                public void onError(String message) {
+                    if (isFinishing() || isDestroyed()) return;
+                    setLoginBusy(false);
+                    ui.removeCallbacks(progressTick);
+                    loginLay.setVisibility(View.VISIBLE);
+                    mainLay.setVisibility(View.GONE);
+                    statusView.setText(summarize(message));
+                    writeLastDiag(summarize(message));
+                    showDiag(message);
+                }
+            });
+        } catch (Throwable t) {
+            setLoginBusy(false);
+            statusView.setText("启动连接失败：" + t);
+            writeLastDiag("启动连接失败：" + t);
+            return;
+        }
         ui.postDelayed(progressTick, 1200);
     }
 
@@ -299,9 +389,38 @@ public class GmActivity extends Activity {
             session.close();
             session = null;
         }
+        setLoginBusy(false);
         mainLay.setVisibility(View.GONE);
         loginLay.setVisibility(View.VISIBLE);
         statusView.setText("已断开连接");
+    }
+
+    /** 连接期间锁定按钮，避免重复点击开出多条 GM 会话。 */
+    private void setLoginBusy(boolean busy) {
+        if (loginBt == null) return;
+        loginBt.setEnabled(!busy);
+        loginBt.setText(busy ? "连接中..." : "连 接");
+    }
+
+    /* ==================== 上次会话记录 ==================== */
+
+    /**
+     * 把当前阶段写盘（commit 同步落盘），进程被 System.exit / 崩溃带走也不会丢。
+     * 写新记录时重置“已提示”标记，方便游戏登录页再提示一次。
+     */
+    private void writeLastDiag(String text) {
+        if (prefs == null || text == null || text.length() == 0) return;
+        String t = new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                .format(new java.util.Date());
+        prefs.edit()
+                .putString(KEY_LAST_DIAG, t + "  " + text)
+                .remove(KEY_DIAG_SEEN)
+                .commit();
+    }
+
+    private void clearLastDiag() {
+        if (prefs == null) return;
+        prefs.edit().remove(KEY_LAST_DIAG).remove(KEY_DIAG_SEEN).commit();
     }
 
     /* ==================== 数据加载 ==================== */
@@ -670,20 +789,26 @@ public class GmActivity extends Activity {
 
     /** 显示连接诊断（可选中复制）。 */
     private void showDiag(String msg) {
-        TextView tv = new TextView(this);
-        tv.setText(msg);
-        tv.setTextSize(12.5f);
-        tv.setTextColor(C_TEXT);
-        tv.setTextIsSelectable(true);
-        tv.setPadding(dp(14), dp(14), dp(14), dp(14));
+        if (isFinishing() || isDestroyed()) return;
+        try {
+            TextView tv = new TextView(this);
+            tv.setText(msg);
+            tv.setTextSize(12.5f);
+            tv.setTextColor(C_TEXT);
+            tv.setTextIsSelectable(true);
+            tv.setPadding(dp(14), dp(14), dp(14), dp(14));
 
-        ScrollView sv = new ScrollView(this);
-        sv.addView(tv);
+            ScrollView sv = new ScrollView(this);
+            sv.addView(tv);
 
-        new AlertDialog.Builder(this)
-                .setTitle("GM 连接诊断")
-                .setView(sv)
-                .setPositiveButton("知道了", null)
-                .show();
+            new AlertDialog.Builder(this)
+                    .setTitle("GM 连接诊断")
+                    .setView(sv)
+                    .setPositiveButton("知道了", null)
+                    .show();
+        } catch (Throwable t) {
+            /* 面板已不在前台时弹窗会抛 BadTokenException，这不该让整个进程退出 */
+            toast("诊断信息：" + summarize(msg));
+        }
     }
 }
