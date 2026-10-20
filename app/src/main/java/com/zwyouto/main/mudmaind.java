@@ -392,6 +392,9 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             int i3 = 3;
             int i4 = 9;
             int i5 = 30;
+            if (str == null || str.length() == 0) {
+                return;
+            }
             if (str.charAt(0) == '$') {
                 String substring = str.substring(1, str.indexOf("#"));
                 String[] split = substring.split(",");
@@ -407,6 +410,11 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                 TableRow tableRow = new TableRow(mudmaind.mudsock);
                 for (int i7 = 0; i7 < i2 && (i6 * i2) + i7 <= split2.length - 1; i7++) {
                     String[] split3 = split2[(i6 * i2) + i7].split(":");
+                    /* 服务器给的条目必须是“显示文字:命令”。缺命令的条目（例如旧版
+                     * skills 里末尾只有一个冒号）直接跳过，不能让 split3[1] 越界闪退。 */
+                    if (split3.length < 2 || split3[1].length() == 0) {
+                        continue;
+                    }
                     longitemd longitemdVar = new longitemd(mudmaind.this);
                     longitemdVar.settext1col(mudmaind.syscolor);
                     longitemdVar.settext2col(Color.parseColor("#999999"));
@@ -1155,6 +1163,9 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
         int w = 2;
         int h = 8;
         int s = 25;
+        if (strs == null || strs.length() == 0) {
+            return;
+        }
         if (strs.charAt(0) == '$') {
             String gs = strs.substring(1, strs.indexOf("#"));
             String[] gss = gs.split(",");
@@ -1174,6 +1185,10 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             TableRow ra = new TableRow(mudsock);
             for (int j = 0; j < r && (i * r) + j <= menus.length - 1; j++) {
                 String[] menu = menus[(i * r) + j].split("\\|");
+                /* 弹出菜单同样要求“文字|命令”，缺命令的条目跳过，避免 menu[1] 越界。 */
+                if (menu.length < 2 || menu[1].length() == 0) {
+                    continue;
+                }
                 TextView txt = new TextView(mudsock);
                 CharSequence message = spantxt(menu[0]);
                 txt.setText(message);
