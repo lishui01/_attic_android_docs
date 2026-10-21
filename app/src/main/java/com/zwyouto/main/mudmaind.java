@@ -1405,7 +1405,9 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             }
 
             attrbar bar = new attrbar(this);
-            bar.setTextss(shortname(part[0]) + part[1]);
+            /* 标签直接用服务端给的「气.22.7亿」：和 012 状态栏写法一致，
+             * 也不会像原来那样把 2266542438/2266542438/2100000000 拼出条外。 */
+            bar.setTextss(part[0]);
             bar.setsize(scrw / 56);
             bar.setColorC(Color.parseColor("#66000000"));
             bar.setColorA(col);
