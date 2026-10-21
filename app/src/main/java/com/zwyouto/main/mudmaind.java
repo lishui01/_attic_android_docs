@@ -704,22 +704,33 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                         linearLayout.setOrientation(LinearLayout.HORIZONTAL);
                         for (int i5 = 0; i5 < i; i5++) {
                             if (i4 < split2.length) {
-                                attrbar attrbarVar = new attrbar(mudmaind.this);
                                 final String[] split3 = split2[i4].split(":");
+                                i4++;
+                                /* 数值必须按 long 处理：气/内/精/经验的上限早就过了 22 亿，
+                                 * Integer.parseInt 会抛 NumberFormatException 把整个客户端带崩。 */
+                                if (split3.length < 3) {
+                                    continue;
+                                }
+                                attrbar attrbarVar = new attrbar(mudmaind.this);
                                 attrbarVar.setTextss(split3[0]);
                                 attrbarVar.setColorA(Color.parseColor(split3[2]));
                                 attrbarVar.setsize(mudmaind.scrw / i3);
+                                int i6 = (mudmaind.scrw - ((mudmaind.this.pingmu.densityDpi * i) / 160)) / i;
                                 String[] split4 = split3[1].split("/");
-                                if (split4.length == 3 && Integer.parseInt(split4[2]) > 0) {
-                                    int i6 = (mudmaind.scrw - ((mudmaind.this.pingmu.densityDpi * i) / 160)) / i;
-                                    attrbarVar.setWA((Integer.parseInt(split4[0]) * i6) / Integer.parseInt(split4[2]));
-                                    attrbarVar.setWB((Integer.parseInt(split4[1]) * i6) / Integer.parseInt(split4[2]));
-                                } else if (split4.length == 2 && Integer.parseInt(split4[1]) > 0) {
-                                    int i7 = (mudmaind.scrw - ((mudmaind.this.pingmu.densityDpi * i) / 160)) / i;
-                                    attrbarVar.setWA((Integer.parseInt(split4[0]) * i7) / Integer.parseInt(split4[1]));
-                                    attrbarVar.setWB(i7);
-                                } else if (split4.length == 1) {
-                                    attrbarVar.setWA((mudmaind.scrw - ((mudmaind.this.pingmu.densityDpi * i) / 160)) / i);
+                                if (split4.length >= 3) {
+                                    long l6 = num(split4[2]);
+                                    if (l6 > 0) {
+                                        attrbarVar.setWA(barpx(num(split4[0]), l6, i6));
+                                        attrbarVar.setWB(barpx(num(split4[1]), l6, i6));
+                                    }
+                                } else if (split4.length == 2) {
+                                    long l7 = num(split4[1]);
+                                    if (l7 > 0) {
+                                        attrbarVar.setWA(barpx(num(split4[0]), l7, i6));
+                                        attrbarVar.setWB(i6);
+                                    }
+                                } else {
+                                    attrbarVar.setWA(i6);
                                     attrbarVar.setTextss(split3[0] + ":" + split3[1]);
                                 }
                                 if (split3.length == 4) {
@@ -734,7 +745,6 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                 }
                                 layoutParams.height = mudmaind.scrw / i2;
                                 linearLayout.addView(attrbarVar, layoutParams);
-                                i4++;
                             }
                         }
                         mudmaind.this.myinfolay.addView(linearLayout, layoutParams2);
@@ -1380,13 +1390,8 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                 continue;
             }
             String[] nums = part[1].split("/");
-            int cur = 0;
-            int max = 0;
-            try {
-                cur = Integer.parseInt(nums[0].trim());
-                max = nums.length > 1 ? Integer.parseInt(nums[1].trim()) : cur;
-            } catch (Exception e) {
-            }
+            long cur = num(nums[0]);
+            long max = nums.length > 1 ? num(nums[1]) : cur;
             if (max < 1) {
                 max = Math.max(cur, 1);
             }
@@ -1420,6 +1425,23 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             dot = s.indexOf('：');
         }
         return dot >= 0 ? s.substring(0, dot) : s.trim();
+    }
+
+    /** 服务端数值可能超出 int 范围（气/内/精/经验上限早过 22 亿），统一按 long 解析；脏数据当 0。 */
+    private static long num(String s) {
+        try {
+            return Long.parseLong(s.trim());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** cur/max 折算成条宽像素：long 运算避免溢出，结果夹在 0~w。 */
+    private static int barpx(long cur, long max, int w) {
+        if (max < 1 || w < 1) {
+            return 0;
+        }
+        return (int) Math.max(0, Math.min(w, cur * w / max));
     }
 
     public void addamsg(LinearLayout linearLayout) {
