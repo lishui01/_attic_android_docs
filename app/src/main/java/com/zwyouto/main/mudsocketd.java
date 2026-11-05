@@ -12,6 +12,8 @@ import java.io.PrintWriter;
 import java.io.Writer;
 import java.net.Socket;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class mudsocketd extends Application {
     /**
@@ -25,8 +27,8 @@ public class mudsocketd extends Application {
     /** 默认服务器地址（反代出来的 6666）。登录页可改。 */
     public static final String DEFAULT_HOST = "frp-net.com";
     public static final int DEFAULT_PORT = 27356;
-    private static PrintWriter out;
-    private boolean action;
+    private static volatile PrintWriter out;
+    private volatile boolean action;
     private String addr;
     private boolean bbact;
     private String content;
@@ -35,9 +37,9 @@ public class mudsocketd extends Application {
     private String gamepart;
     private String gameport;
     private boolean gxact;
-    private BufferedReader in;
+    private volatile BufferedReader in;
     private boolean ingame;
-    private boolean iscon;
+    private volatile boolean iscon;
     private boolean jobact;
     private String jobs;
     private boolean lookact;
@@ -55,8 +57,14 @@ public class mudsocketd extends Application {
     private String senceexit;
     private String sencenpc;
     private String senceshort;
-    private static Socket socket = null;
-    private static boolean cmdss = true;
+    private static volatile Socket socket = null;
+    private static volatile boolean cmdss = true;
+    /** 单写入线程：命令按发送顺序落线，避免每条指令都新建一个线程。 */
+    private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "mud-writer");
+        t.setDaemon(true);
+        return t;
+    });
     private String pindaoa = "世界";
     private String pindaob = "chat";
     private String myid = "null";
@@ -157,6 +165,9 @@ public class mudsocketd extends Application {
                     return null;
                 }
                 try {
+                    if (this.in == null) {
+                        return "连接已断开！";
+                    }
                     this.content = this.in.readLine();
                 } catch (IOException e) {
                     this.content = "连接已断开！";
@@ -199,16 +210,19 @@ public class mudsocketd extends Application {
     public static void mudout(final String mudout) {
          
 // java.lang.Runnable
-        new Thread(() -> {
-            if (!mudsocketd.socket.isClosed() && !mudsocketd.socket.isInputShutdown()) {
-                Log.d("socket", mudsocketd.socket.toString() + "run: " + mudout);
-                if (mudsocketd.cmdss) {
-                    mudsocketd.out.println(mudout);
-                } else {
-                    mudsocketd.out.println(mudout.replace("\n", ";"));
-                }
+        WRITER.execute(() -> {
+            Socket s = mudsocketd.socket;
+            PrintWriter w = mudsocketd.out;
+            if (s == null || w == null || s.isClosed() || s.isInputShutdown()) {
+                return;
             }
-        }).start();
+            Log.d("socket", s.toString() + "run: " + mudout);
+            if (mudsocketd.cmdss) {
+                w.println(mudout);
+            } else {
+                w.println(mudout.replace("\n", ";"));
+            }
+        });
     }
 
     public void set_cmdss(Boolean y) {

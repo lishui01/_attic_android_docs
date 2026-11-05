@@ -445,7 +445,7 @@ public class logind extends Activity {
         this.mdateedit.putString("server", addr);
         this.mdateedit.putString("name", id);
         this.mdateedit.putString("pass", pass);
-        this.mdateedit.commit();
+        this.mdateedit.apply();
         this.mudsock.set_ucenter_id(id);
         this.mudsock.set_ucenter_pass(pass);
         this.mudsock.set_ucenter_email(id + "@zj");
@@ -514,7 +514,7 @@ public class logind extends Activity {
         String diag = this.mdate.getString("gm_last_diag", "");
         if (diag.equals(BuildConfig.FLAVOR)) return;
         if (diag.equals(this.mdate.getString("gm_diag_seen", ""))) return;
-        this.mdate.edit().putString("gm_diag_seen", diag).commit();
+        this.mdate.edit().putString("gm_diag_seen", diag).apply();
         Toast.makeText(getBaseContext(), "GM面板记录：" + diag, Toast.LENGTH_LONG).show();
     }
 
@@ -554,7 +554,7 @@ public class logind extends Activity {
                     if (logind.this.slistpage == 1 && logind.this.mudsock.get_ucenter_id().equals(BuildConfig.FLAVOR)) {
                         logind.this.mdateedit.putString("name", logind.this.nameedit.getText().toString());
                         logind.this.mdateedit.putString("pass", logind.this.passedit.getText().toString());
-                        logind.this.mdateedit.commit();
+                        logind.this.mdateedit.apply();
                         logind.this.mudsock.set_ucenter_id(logind.this.nameedit.getText().toString());
                         logind.this.mudsock.set_ucenter_pass(logind.this.passedit.getText().toString());
                         logind.this.email = split[split.length - 1];

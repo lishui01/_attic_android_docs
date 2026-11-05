@@ -155,8 +155,9 @@ public class duihua extends Activity {
                     if (duihua.this.okmudout.equals("")) {
                         return;
                     }
-                    for (int i4 = 0; i4 < duihua.this.okmudout.split("\\$sock#").length; i4++) {
-                        mudsocketd.mudout(duihua.this.okmudout.split("\\$sock#")[i4]);
+                    String[] cmds = duihua.this.okmudout.split("\\$sock#");
+                    for (String cmd : cmds) {
+                        mudsocketd.mudout(cmd);
                     }
                     return;
                 case id.qxdh /* 2131230752 */:

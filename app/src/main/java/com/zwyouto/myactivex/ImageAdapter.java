@@ -1,9 +1,10 @@
 package com.zwyouto.myactivex;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.ThumbnailUtils;
-import android.os.Build;
+import android.util.LruCache;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AbsListView;
@@ -17,6 +18,13 @@ public class ImageAdapter extends BaseAdapter {
     private final Context mContext;
     private int w = 100;
     private int h = 100;
+    /** 缩略图缓存：滚动时不再对每个 position 重复解码原图。 */
+    private final LruCache<String, Bitmap> thumbCache = new LruCache<String, Bitmap>(4 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getByteCount();
+        }
+    };
 
     @Override // android.widget.Adapter
     public int getCount() {
@@ -43,12 +51,28 @@ public class ImageAdapter extends BaseAdapter {
         } else {
             imageView = (ImageView) view;
         }
-        try {
-            imageView.setImageBitmap(ThumbnailUtils.extractThumbnail(BitmapFactory.decodeStream(this.mContext.getAssets().open(this.dirs + "/" + this.imgfiles[i])), 180, 130));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        String name = this.imgfiles[i];
+        String key = this.dirs + "/" + name;
+        Bitmap thumb = this.thumbCache.get(key);
+        if (thumb == null) {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = 2;
+            try {
+                Bitmap src = BitmapFactory.decodeStream(
+                        this.mContext.getAssets().open(key), null, opts);
+                if (src != null) {
+                    thumb = ThumbnailUtils.extractThumbnail(src, 180, 130);
+                    if (thumb != src) {
+                        src.recycle();
+                    }
+                    this.thumbCache.put(key, thumb);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
-        imageView.setTag(this.imgfiles[i].substring(0, this.imgfiles[i].indexOf(".")));
+        imageView.setImageBitmap(thumb);
+        imageView.setTag(name.substring(0, name.indexOf(".")));
         return imageView;
     }
 

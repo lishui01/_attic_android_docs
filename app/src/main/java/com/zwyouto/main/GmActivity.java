@@ -329,7 +329,7 @@ public class GmActivity extends Activity {
         prefs.edit()
                 .putString("gm_name", uid)
                 .putString("gm_pass", pwd)
-                .commit();
+                .apply();
 
         account = uid.toLowerCase();
         selectedId = "";
@@ -415,12 +415,12 @@ public class GmActivity extends Activity {
         prefs.edit()
                 .putString(KEY_LAST_DIAG, t + "  " + text)
                 .remove(KEY_DIAG_SEEN)
-                .commit();
+                .apply();
     }
 
     private void clearLastDiag() {
         if (prefs == null) return;
-        prefs.edit().remove(KEY_LAST_DIAG).remove(KEY_DIAG_SEEN).commit();
+        prefs.edit().remove(KEY_LAST_DIAG).remove(KEY_DIAG_SEEN).apply();
     }
 
     /* ==================== 数据加载 ==================== */

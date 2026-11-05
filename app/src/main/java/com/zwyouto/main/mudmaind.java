@@ -42,10 +42,13 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 @SuppressLint({"ShowToast"})
 public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateListener, MediaPlayer.OnCompletionListener, MediaPlayer.OnErrorListener, MediaPlayer.OnPreparedListener, GestureDetector.OnGestureListener, View.OnTouchListener, Runnable {
     public static Handler mHandler1;
+    /** 线路分隔符：预编译一次，避免每行推送都重新编译正则。 */
+    private static final Pattern ZJ_SEP = Pattern.compile("\\$zj#");
     protected static int progress;
     static RelativeLayout hudong_lay;
     static RelativeLayout maps_lay;
@@ -128,7 +131,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
     private TextView change_long;
     private RelativeLayout chatroom;
     private Button cmds_exit;
-    private String content;
+    private volatile String content;
     private ProgressBar dengdaijindu1;
     private Button e_exit;
     private RelativeLayout exits_ck;
@@ -155,6 +158,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
     private LinearLayout minichatmsg;
     private ScrollView minichatview;
     private LinearLayout fight_panel;
+    private Runnable fightPanelTick;
     private LinearLayout fight_panel_list;
     private long fight_panel_ts;
     private LinearLayout minifightmsg;
@@ -266,8 +270,8 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             }
         }
     };
-    private boolean loop = true;
-    private int sleep = 100;
+    private volatile boolean loop = true;
+    private volatile int sleep = 1;
     @SuppressLint("HandlerLeak")
     Handler mHandler = new Handler() {  
         private String[] tells;
@@ -275,7 +279,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
         private void take_tt(String str) {
             mudmaind.this.tt_btlay.removeAllViews();
             if (str.length() > 2) {
-                String[] split = str.split("\\$zj#");
+                String[] split = ZJ_SEP.split(str);
                 for (String str2 : split) {
                     String[] split2 = str2.split(":");
                     String str3 = split2[0];
@@ -311,7 +315,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
 
         private void takeexit(String str) {
             if (str.length() > 2) {
-                String[] split = str.split("\\$zj#");
+                String[] split = ZJ_SEP.split(str);
                 for (String str2 : split) {
                     String[] split2 = str2.split(":");
                     String str3 = split2[0];
@@ -404,7 +408,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                 i5 = Integer.parseInt(split[3]);
                 str = str.substring(substring.length() + 2);
             }
-            String[] split2 = str.split("\\$zj#");
+            String[] split2 = ZJ_SEP.split(str);
             int i6 = 0;
             while (i6 < (split2.length / i2) + 1) {
                 TableRow tableRow = new TableRow(mudmaind.mudsock);
@@ -495,7 +499,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             mudmaind.this.fcline2.setVisibility(View.VISIBLE);
             ;
             if (str.length() > 4) {
-                String[] split = str.split("\\$zj#");
+                String[] split = ZJ_SEP.split(str);
                 for (String str2 : split) {
                     String[] split2 = str2.split(":");
                     longitemd longitemdVar = new longitemd(mudmaind.this);
@@ -561,7 +565,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             ;
             mudmaind.this.recorder.setVisibility(View.GONE);
             ;
-            mudmaind.this.sleep = 20;
+            mudmaind.this.sleep = 1;
         }
 
         @Override // android.os.Handler
@@ -613,7 +617,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                     ;
                     mudmaind.this.mainmenulist.setVisibility(View.GONE);
                     ;
-                    this.tells = mudmaind.this.content.substring(4).split("\\$zj#");
+                    this.tells = ZJ_SEP.split(mudmaind.this.content.substring(4));
                     mudmaind.this.ob_hudong_list.removeAllViews();
                     mudmaind.this.ob_hudong2_list.removeAllViews();
                     mudmaind.hudong_lay.setVisibility(View.VISIBLE);
@@ -917,7 +921,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                         mudmaind.this.allchatmsg.removeViewAt(0);
                     }
                 } else {
-                    mudmaind.this.sleep = 20;
+                    mudmaind.this.sleep = 1;
                     mudmaind.this.addamsg(mudmaind.minimainmsg);
                     if (mudmaind.minimainmsg.getChildCount() > 50) {
                         mudmaind.minimainmsg.removeViewAt(0);
@@ -1697,10 +1701,13 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             // 空闲兜底：服务端只在"还能被调用一次"时才发收起信号
             // （combatd.c 的 push_fight_panel），逃出战斗/被抢怪等路径不会再发，
             // 所以这里按时间自己收，超过 6 秒没有推送就把悬浮窗关掉。
-            this.fight_panel.postDelayed(new Runnable() {
+            this.fightPanelTick = new Runnable() {
 
                 @Override // java.lang.Runnable
                 public void run() {
+                    if (!mudmaind.this.loop || mudmaind.this.isFinishing()) {
+                        return;
+                    }
                     if (mudmaind.this.fight_panel.getVisibility() == View.VISIBLE
                             && System.currentTimeMillis() - mudmaind.this.fight_panel_ts > 6000) {
                         mudmaind.this.fight_panel.setVisibility(View.GONE);
@@ -1708,7 +1715,8 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                     }
                     mudmaind.this.fight_panel.postDelayed(this, 1000);
                 }
-            }, 1000);
+            };
+            this.fight_panel.postDelayed(this.fightPanelTick, 1000);
         }
         hudong_lay = findViewById(R.id.hudong_lay);
         this.mainlay = findViewById(R.id.mainlay);
@@ -2005,7 +2013,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                             mudmaind.this.change_long.setText("隐藏");
                             mudmaind.this.mdateedit.putString("long_text", "open");
                         }
-                        mudmaind.this.mdateedit.commit();
+                        mudmaind.this.mdateedit.apply();
                         return;
                     case R.id.gb_maps /* 2131230885 */:
                         mudmaind.maps_lay.setVisibility(View.GONE);
@@ -2059,7 +2067,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                         mudsocketd.mudout("mycmds");
                         mudsocketd.mudout("look");
                         mudmaind.this.mdateedit.putString("mode", "day");
-                        mudmaind.this.mdateedit.commit();
+                        mudmaind.this.mdateedit.apply();
                         int unused13 = mudmaind.day = 1;
                         return;
                     case R.id.help_bt /* 2131230895 */:
@@ -2087,7 +2095,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                         mudsocketd.mudout("mycmds");
                         mudsocketd.mudout("look");
                         mudmaind.this.mdateedit.putString("mode", "night");
-                        mudmaind.this.mdateedit.commit();
+                        mudmaind.this.mdateedit.apply();
                         int unused18 = mudmaind.day = 0;
                         return;
                     case R.id.mud_bt /* 2131230896 */:
@@ -2115,7 +2123,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                         mudsocketd.mudout("mycmds");
                         mudsocketd.mudout("look");
                         mudmaind.this.mdateedit.putString("mode", "mud");
-                        mudmaind.this.mdateedit.commit();
+                        mudmaind.this.mdateedit.apply();
                         int unused23 = mudmaind.day = 0;
                         return;
                     case R.id.ch_low /* 2131230897 */:
@@ -2131,7 +2139,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                             }
                         });
                         mudmaind.this.mdateedit.putInt("ch_hi", 8);
-                        mudmaind.this.mdateedit.commit();
+                        mudmaind.this.mdateedit.apply();
                         return;
                     case R.id.ch_hi /* 2131230898 */:
                         mudmaind.this.minichatview.getLayoutParams().height = mudmaind.scrw / 3;
@@ -2146,7 +2154,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                             }
                         });
                         mudmaind.this.mdateedit.putInt("ch_hi", 3);
-                        mudmaind.this.mdateedit.commit();
+                        mudmaind.this.mdateedit.apply();
                         return;
                     case R.id.minglingbt /* 2131230899 */:
                         mudmaind.mengban1.setVisibility(View.GONE);
@@ -2307,7 +2315,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                             public void onClick(DialogInterface dialogInterface, int i) {
                                 ((TextView) view).setTag(editText.getText().toString());
                                 mudmaind.this.mdateedit.putString("senbt", editText.getText().toString());
-                                mudmaind.this.mdateedit.commit();
+                                mudmaind.this.mdateedit.apply();
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
                         return false;
@@ -2322,7 +2330,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_11a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_11b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2338,7 +2346,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_1a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_1b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2354,7 +2362,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_2a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_2b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2370,7 +2378,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_3a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_3b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2386,7 +2394,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_4a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_4b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2402,7 +2410,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_5a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_5b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2418,7 +2426,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_6a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_6b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2434,7 +2442,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_7a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_7b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2450,7 +2458,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_8a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_8b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2466,7 +2474,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_9a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_9b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2482,7 +2490,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_10a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_10b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2497,7 +2505,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_12a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_12b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2513,7 +2521,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_13a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_13b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2529,7 +2537,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_14a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_14b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2545,7 +2553,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_15a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_15b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2561,7 +2569,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_16a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_16b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2577,7 +2585,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                                     ((TextView) view).setTag(editText.getText().toString().split(",")[1]);
                                     mudmaind.this.mdateedit.putString("my_cmds_17a", editText.getText().toString().split(",")[0]);
                                     mudmaind.this.mdateedit.putString("my_cmds_17b", editText.getText().toString().split(",")[1]);
-                                    mudmaind.this.mdateedit.commit();
+                                    mudmaind.this.mdateedit.apply();
                                 }
                             }
                         }).setNegativeButton("取消", (DialogInterface.OnClickListener) null).show();
@@ -2897,6 +2905,22 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        this.loop = false;
+        if (this.fight_panel != null && this.fightPanelTick != null) {
+            this.fight_panel.removeCallbacks(this.fightPanelTick);
+        }
+        if (mudmaind.vmsg != null) {
+            mudmaind.vmsg.release();
+            mudmaind.vmsg = null;
+        }
+        mudmaind.minimainmsg = null;
+        mudmaind.my_web = null;
+        mudmaind.hudong_lay = null;
+        mudmaind.maps_lay = null;
+        mudmaind.mengban1 = null;
+        mudmaind.pop_menu = null;
+        mudmaind.player = null;
+        mudmaind.record = null;
         super.onDestroy();
     }
 
@@ -2980,48 +3004,52 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                 this.content = mudsock.mudin();
                 if (mudsock.isconing()) {
                     this.content = null;
-                    try {
-                        Thread.sleep(1000L);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
+                    if (!nap(1000L)) {
+                        return;
                     }
                 } else if (this.content == null) {
-                    try {
-                        Thread.sleep(300L);
-                    } catch (InterruptedException e2) {
-                        throw new RuntimeException(e2);
+                    if (!nap(300L)) {
+                        return;
                     }
                 } else if (this.content.equals("连接已断开！")) {
                     this.content = mudsock.recon();
                     this.mHandler.sendMessage(this.mHandler.obtainMessage(1));
-                    try {
-                        Thread.sleep(1000L);
-                    } catch (InterruptedException e3) {
-                        throw new RuntimeException(e3);
+                    if (!nap(1000L)) {
+                        return;
                     }
                 } else if (this.content.length() <= 3 || !this.content.startsWith("ver")) {
                     this.mHandler.sendMessage(this.mHandler.obtainMessage(1));
-                    try {
-                        Thread.sleep(this.sleep);
-                    } catch (InterruptedException e4) {
-                        throw new RuntimeException(e4);
+                    if (!nap(this.sleep)) {
+                        return;
                     }
                 } else {
                     final String[] split = this.content.split(",");
                     // 本地生成 zj 握手应答，不再请求 hugongzi.top/mobi/check.php
                     mudsocketd.mudout(logind.zjAnswer(split.length > 1 ? split[1] : BuildConfig.FLAVOR));
-                    try {
-                        Thread.sleep(100L);
-                    } catch (InterruptedException e5) {
-                        throw new RuntimeException(e5);
+                    if (!nap(100L)) {
+                        return;
                     }
                 }
+            } else if (!nap(2L)) {
+                // 上一条还在主线程处理中：让出 CPU，不要全速空转
+                return;
             }
         }
     }
 
+    /** 返回 false 表示被中断，读循环应结束；中断不再被当成崩溃上报。 */
+    private static boolean nap(long millis) {
+        try {
+            Thread.sleep(millis);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
     protected void takebutton(String str) {
-        String[] split = str.replace("$br#", "\n").split("\\$zj#");
+        String[] split = ZJ_SEP.split(str.replace("$br#", "\n"));
         this.cmds_exit.setText("关闭");
         for (String str2 : split) {
             String[] split2 = str2.split(":");
@@ -3171,7 +3199,7 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                 this.mdateedit.putString("my_cmds_17b", split2[2]);
             }
         }
-        this.mdateedit.commit();
+        this.mdateedit.apply();
     }
 
     protected void takemap(String str) {
@@ -3235,15 +3263,12 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                     this.outputStream.writeBytes(this.twoHyphens + this.boundary + this.lineEnd);
                     this.outputStream.writeBytes("Content-Disposition: form-data; name=\"uploadfile\";filename=\"" + this.file.getName() + "\"" + this.lineEnd);
                     this.outputStream.writeBytes(this.lineEnd);
-                    int min = Math.min(this.fileInputStream.available(), 262144);
-                    byte[] bArr = new byte[min];
-                    int read = this.fileInputStream.read(bArr, 0, min);
-                    while (read > 0) {
-                        this.outputStream.write(bArr, 0, min);
-                        j += min;
+                    byte[] bArr = new byte[262144];
+                    int read;
+                    while ((read = this.fileInputStream.read(bArr)) > 0) {
+                        this.outputStream.write(bArr, 0, read);
+                        j += read;
                         publishProgress(Integer.valueOf((int) ((100 * j) / this.totalSize)));
-                        min = Math.min(this.fileInputStream.available(), 262144);
-                        read = this.fileInputStream.read(bArr, 0, min);
                     }
                     this.outputStream.writeBytes(this.lineEnd);
                     this.outputStream.writeBytes(this.twoHyphens + this.boundary + this.twoHyphens + this.lineEnd);
@@ -3448,15 +3473,12 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
                     this.outputStream.writeBytes(this.twoHyphens + this.boundary + this.lineEnd);
                     this.outputStream.writeBytes("Content-Disposition: form-data; name=\"uploadfile\";filename=\"" + this.file.getName() + "\"" + this.lineEnd);
                     this.outputStream.writeBytes(this.lineEnd);
-                    int min = Math.min(this.fileInputStream.available(), 262144);
-                    byte[] bArr = new byte[min];
-                    int read = this.fileInputStream.read(bArr, 0, min);
-                    while (read > 0) {
-                        this.outputStream.write(bArr, 0, min);
-                        j += min;
+                    byte[] bArr = new byte[262144];
+                    int read;
+                    while ((read = this.fileInputStream.read(bArr)) > 0) {
+                        this.outputStream.write(bArr, 0, read);
+                        j += read;
                         publishProgress((int) ((100 * j) / this.totalSize));
-                        min = Math.min(this.fileInputStream.available(), 262144);
-                        read = this.fileInputStream.read(bArr, 0, min);
                     }
                     this.outputStream.writeBytes(this.lineEnd);
                     this.outputStream.writeBytes(this.twoHyphens + this.boundary + this.twoHyphens + this.lineEnd);
