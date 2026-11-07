@@ -171,7 +171,10 @@ public class duihua extends Activity {
         };
         gbdh.setOnClickListener(onClickListener);
         qxdh.setOnClickListener(onClickListener);
-        mudsock.setsencelong("锟斤拷");
+        // 原来这里被写成了乱码「锟斤拷」。mudsocketd.mudin() 只在 sencelong
+        // 等于 "无" 时读 socket，设成别的值会让读线程永久停摆、下次对话还会
+        // 把这串乱码当内容显示。读完长文本后必须设回 "无" 恢复收包。
+        mudsock.setsencelong("无");
     }
 
     @Override // android.app.Activity, android.view.KeyEvent.Callback

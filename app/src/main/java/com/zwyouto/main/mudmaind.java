@@ -582,7 +582,12 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
             if (mudmaind.this.content.length() < 4) {
                 mudmaind.this.content = null;
             } else if (mudmaind.this.content.equals("版本验证成功")) {
-                mudsocketd.mudout(mudmaind.mudsock.get_ucenter_id() + "║" + mudmaind.mudsock.get_ucenter_pass() + "║" + mudmaind.mudsock.getgamekey() + "║" + mudmaind.mudsock.get_ucenter_email());
+                // 重连时这条也会跑到：getgamekey() 全库从未被赋值，恒为 null，
+                // 发过去就是 id║pass║null║email。与登录页一致改用 zjCipher()。
+                String uid = mudmaind.mudsock.get_ucenter_id();
+                String upass = mudmaind.mudsock.get_ucenter_pass();
+                mudsocketd.mudout(uid + "║" + upass + "║" + logind.zjCipher(uid, upass) + "║"
+                        + mudmaind.mudsock.get_ucenter_email());
                 mudmaind.this.content = null;
             } else {
                 if (mudmaind.this.content.equals("连接已断开！")) {
@@ -2901,6 +2906,20 @@ public class mudmaind extends Activity implements MediaPlayer.OnBufferingUpdateL
         this.mGestureDetector = new GestureDetector(this);
         this.mainThread = new Thread(this);
         this.mainThread.start();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 切后台 / 黑屏回来：socket 多半已被 NAT 或 Doze 掐断。
+        // 读线程还活着时，mudin() 拿到 EOF 会自己走 recon()；这里补两件事：
+        //   1) 发一条无害命令，让「半死不活」的连接立刻暴露出来；
+        //   2) 读线程若已意外退出（nap 被中断会直接 return），重新拉起来。
+        if (this.loop && (this.mainThread == null || !this.mainThread.isAlive())) {
+            this.mainThread = new Thread(this);
+            this.mainThread.start();
+        }
+        mudsocketd.mudout("look");
     }
 
     @Override // android.app.Activity

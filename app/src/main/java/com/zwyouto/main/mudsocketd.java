@@ -135,6 +135,9 @@ public class mudsocketd extends Application {
                 Log.d("socket", e.toString());
             }
         }
+        // 旧读写流一起作废：新 socket 是异步建的，中途 mudin() 不能读到旧 buffer
+        this.in = null;
+        out = null;
         new Thread(new Runnable() {  
             @Override // java.lang.Runnable
             public void run() {
@@ -159,24 +162,25 @@ public class mudsocketd extends Application {
         if (this.iscon) {
             return null;
         }
-        if (socket != null && !socket.isClosed() && socket.isConnected()) {
-            if (!socket.isInputShutdown()) {
-                if (!Objects.equals(this.sencelong, "无")) {
-                    return null;
-                }
-                try {
-                    if (this.in == null) {
-                        return "连接已断开！";
-                    }
-                    this.content = this.in.readLine();
-                } catch (IOException e) {
-                    this.content = "连接已断开！";
-                }
-            } else {
-                this.content = "连接已断开！";
-            }
-        } else {
-            this.content = "连接已断开！";
+        // sencelong 兼作 duihua 对话界面的「暂停读」标记：
+        // mudmaind 收到 ESC010 时写入长文本，duihua.onCreate() 结束会设回 "无"。
+        if (!Objects.equals(this.sencelong, "无")) {
+            return null;
+        }
+        if (this.in == null) {
+            return "连接已断开！";
+        }
+        try {
+            this.content = this.in.readLine();
+        } catch (IOException e) {
+            return "连接已断开！";
+        }
+        // Java Socket.isConnected() 连过一次就恒为 true，isInputShutdown()
+        // 也只在本地主动关闭时才 true，两者都测不出对端/NAT 断开。
+        // readLine() 返回 null（EOF）才是唯一可靠的断线信号；原来把 null
+        // 原样返回，读循环当成「暂无数据」一直轮询，recon() 永远不触发。
+        if (this.content == null) {
+            return "连接已断开！";
         }
         return this.content;
     }
@@ -203,6 +207,10 @@ public class mudsocketd extends Application {
 
     public String recon() {
         this.iscon = true;
+        // 只重建 TCP 即可：服务端对新连接会主动发 ver1.0,<ZJKEY>，
+        // mudmaind 读循环回 zjAnswer()、Handler 收到「版本验证成功」再补发
+        // 账号密码，整条登录握手会自动重跑一遍。只要服务端角色还在
+        // （NET_DEAD_TIMEOUT 内），logind.c 就走 reconnect() 接着原角色玩。
         new_sock(this.addr, this.port);
         return "连接错误，正在重新连接...";
     }
